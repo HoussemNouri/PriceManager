@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+
+  # 1. Conteneur PHP-FPM (le cœur de l'application Symfony)
+  price-manager-php-fpm:
+    image: price-manager-php-fpm:8.3
+    container_name: price_manager_php_fpm # Nom de conteneur suggéré pour la cohérence
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.php
+    volumes:
+      - .:/var/www/html
+    # Commande qui attend la DB, exécute les migrations et démarre php-fpm
+    command: >
+      sh -c "
+        sleep 10;
+        php bin/console doctrine:database:drop --force || true;
+        php bin/console doctrine:database:create;
+        php bin/console doctrine:migrations:migrate --no-interaction;
+        exec php-fpm"
+    restart: always
+    environment:
+      # L'hôte a été modifié pour pointer vers le service 'price-manager-mariadb' 
+      DATABASE_URL: mysql://user:pass@price-manager-mariadb:3306/db_price_manager?serverVersion=mariadb-10.11.8
+
+  # 2. Conteneur Nginx (le serveur Web)
+  price-manager-nginx:
+    image: nginx:stable-alpine
+    container_name: price_manager_nginx
+    ports:
+      - "80:80" # http://localhost
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - price-manager-php-fpm
+    restart: always
+
+  # 3. Conteneur MariaDB (le serveur de base de données)
+  price-manager-mariadb:
+    image: mariadb:10.11
+    container_name: price_manager_mariadb
+    ports:
+      - "3306:3306"
+    restart: always
+    environment:
+      # Configuration de la base de données
+      MARIADB_ROOT_PASSWORD: root_pass
+      MARIADB_DATABASE: db_price_manager
+      MARIADB_USER: user
+      MARIADB_PASSWORD: pass
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+  # 4. Conteneur phpMyAdmin (Outil d'interface graphique)
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: price_manager_phpmyadmin # Nom de conteneur suggéré pour la cohérence
+    ports:
+      - "8080:80" # http://localhost:8080
+    environment:
+      # Connexion de phpMyAdmin au service MariaDB
+      PMA_HOST: price-manager-mariadb 
+      PMA_PORT: 3306
+    depends_on:
+      - price-manager-mariadb
+    restart: always
+
+volumes:
+  mariadb_data:
